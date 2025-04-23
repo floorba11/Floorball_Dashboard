@@ -9,8 +9,19 @@ API_URL = f"http://api-v2.swissunihockey.ch/api/calendars?team_id={TEAM_ID}"
 st.set_page_config(page_title="Nächste Spiele", layout="centered")
 
 st.title("🏑 Nächste 3 Spiele des Teams")
+headers = {
+    "User-Agent": "Mozilla/5.0"
+}
+response = requests.get(API_URL, headers=headers)
 
-response = requests.get(API_URL)
+if response.status_code == 200:
+    try:
+        data = response.json()
+        # Weiter wie gehabt...
+    except Exception as e:
+        st.error(f"Fehler beim Verarbeiten der JSON-Daten: {e}")
+else:
+    st.error(f"Fehler beim Abrufen der API: Statuscode {response.status_code}")
 if response.status_code == 200:
     data = response.json()
     games = data.get("data", {}).get("calendar", {}).get("games", [])
