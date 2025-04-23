@@ -1,8 +1,7 @@
 # Liste von Teams: name + team_id
 teams = {
-    "Tigers Langnau": 429523,
-    "Floorball Köniz Bern": 429524,
-    "Floorball Thurgau": 429525  # Beispiel-IDs
+    "Tigers LUPL": 429523,
+    "Herren Frutigen": 429611,
 }
 
 def get_team_logo(name):
