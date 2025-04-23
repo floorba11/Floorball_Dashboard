@@ -41,7 +41,7 @@ def display_game_event(event, team_name):
         st.caption(f"📅 {date} | 🕒 {time} | 📍 {location}")
         st.markdown(f"[🔗 Zur Spielseite]({url})")
     with col3:
-        st.image(get_team_logo(away), width=60)
+        st.image(get_team_logo(away), width=200)
     
     st.markdown("---")
 
@@ -75,7 +75,7 @@ def fetch_team_schedule(team_name, team_id):
             st.error(f"Unerwarteter Fehler für {team_name}: {str(e)}")
 
 # Main app
-st.title("🏒 Floorball Spielplan")
+st.title("🏒 Spielplan nächsten 3 Spiele")
 
 # Display schedule for each team
 for team_name, team_id in teams.items():
