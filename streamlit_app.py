@@ -9,8 +9,8 @@ st.set_page_config(page_title="Team Schedule", page_icon="🏒", layout="wide")
 
 # List of teams: name + team_id
 teams = {
-    "Tigers LUPL": 429523,
-    "Herren Frutigen": 429611,
+    "UHT Tornados Frutigen 3. Liga": 429611,
+    "Tigers Langnau L-UPL": 429523,
 }
 
 def get_team_logo(team_name):
