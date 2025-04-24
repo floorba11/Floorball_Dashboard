@@ -182,8 +182,7 @@ def fetch_team_schedule(team_name, team_id):
                 
         except Exception as e:
             st.error(f"Fehler: {str(e)}")
-except requests.exceptions.HTTPError as e:
-    st.error(f"HTTP Error: {e.response.status_code} - {e.response.text}")
+
 # Main app
 st.title("🏒 Floorball Spielplan")
 
