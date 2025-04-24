@@ -89,3 +89,99 @@ for team_name, team_id in teams.items():
     st.header(f"🔷 {team_name}")
     fetch_team_schedule(team_name, team_id)
     st.write("")  # Add some space between teams
+
+
+# Main app
+st.title("🏒 Resultate")
+import requests
+from icalendar import Calendar, Event
+from datetime import datetime, timedelta
+from urllib.parse import urlparse, parse_qs
+
+def get_team_calendar(team_id):
+    """Holt den Kalender für ein Team im iCal-Format und gibt die Events zurück"""
+    url = f"https://api-v2.swissunihockey.ch/api/calendars/team/{team_id}/games"
+    response = requests.get(url)
+    response.raise_for_status()
+    return Calendar.from_ical(response.text)
+
+def extract_game_id_from_url(url):
+    """Extrahiert die Game ID aus einer Swiss Unihockey URL"""
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    return query.get('game', [None])[0]
+
+def get_last_team_games(team_ids, days_back=30):
+    """
+    Findet die letzten Spiele für eine Liste von Teams
+    
+    :param team_ids: Dictionary mit Teamnamen als Schlüssel und Team-IDs als Werte
+    :param days_back: Wie viele Tage in der Vergangenheit nach Spielen suchen
+    :return: Dictionary mit Teamnamen als Schlüssel und game_id als Wert
+    """
+    last_games = {}
+    cutoff_date = datetime.now() - timedelta(days=days_back)
+    
+    for team_name, team_id in team_ids.items():
+        try:
+            cal = get_team_calendar(team_id)
+            last_game = None
+            
+            for component in cal.walk():
+                if component.name == "VEVENT":
+                    dtstart = component.get('dtstart').dt
+                    if isinstance(dtstart, datetime) and dtstart < datetime.now():
+                        url = component.get('url')
+                        game_id = extract_game_id_from_url(url)
+                        
+                        if game_id and (last_game is None or dtstart > last_game[0]):
+                            last_game = (dtstart, game_id)
+            
+            if last_game:
+                last_games[team_name] = last_game[1]
+                print(f"Letztes Spiel für {team_name} am {last_game[0].strftime('%Y-%m-%d')} (ID: {last_game[1]})")
+            else:
+                print(f"Keine Spiele gefunden für {team_name} in den letzten {days_back} Tagen")
+                
+        except Exception as e:
+            print(f"Fehler beim Verarbeiten von {team_name}: {str(e)}")
+    
+    return last_games
+
+def get_game_details(game_id):
+    """Holt die Details für ein spezifisches Spiel"""
+    url = f"https://api-v2.swissunihockey.ch/api/games/{game_id}"
+    response = requests.get(url)
+    response.raise_for_status()
+    return response.json()
+
+def display_last_game_results(team_ids):
+    """Hauptfunktion: Zeigt die letzten Spielresultate für eine Liste von Teams"""
+    print("Suche nach letzten Spielen...")
+    last_games = get_last_team_games(team_ids)
+    
+    print("\nSpielresultate:")
+    for team_name, game_id in last_games.items():
+        try:
+            game = get_game_details(game_id)
+            print(f"\n{team_name}:")
+            print(f"{game['home_name']} vs {game['away_name']}")
+            print(f"Datum: {game['date']} {game['time']}")
+            print(f"Resultat: {game['result']}")
+            print(f"Ort: {game.get('location', {}).get('address', 'N/A')}")
+            print(f"Zuschauer: {game.get('spectators', 'N/A')}")
+        except Exception as e:
+            print(f"\nFehler beim Abrufen der Details für {team_name}: {str(e)}")
+
+# Beispielverwendung
+if __name__ == "__main__":
+    # Dictionary mit Teamnamen und ihren Team-IDs
+    # Diese IDs findest du in den URLs auf der Swiss Unihockey Website
+    example_teams = {
+"Tigers Langnau LUPL": 429523,
+    "Herren Frutigen": 429611,
+    }
+    
+    # Führe den Abruf durch
+    display_last_game_results(example_teams)
+
