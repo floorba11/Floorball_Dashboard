@@ -37,7 +37,7 @@ def display_game_event(event, team_name):
     with col1:
         st.image(get_team_logo(home), width=200)
     with col2:
-        st.subheader(name)
+        st.subheader(f'<div style="text-align:center>name,unsafe_allow_html=True,)
         st.caption(f"📅 {date} | 🕒 {time} | 📍 {location}")
         st.markdown(f"[🔗 Zur Spielseite]({url})")
     with col3:
