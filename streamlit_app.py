@@ -16,7 +16,7 @@ TEAMS = {
 
 def get_team_logo(team_name):
     """Get team logo path or return default if not found"""
-    logo_path = f"logos/{team_name.lower().}.png"
+    logo_path = f"logos/{team_name.lower()}.png"
     return logo_path if os.path.exists(logo_path) else "logos/default.png"
 
 def display_future_game_event(event, team_name):
