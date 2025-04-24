@@ -31,7 +31,8 @@ def display_game_event(event, team_name):
     teams_in_game = name.split(" - ")
     home = teams_in_game[0].strip()
     away = teams_in_game[1].strip() if len(teams_in_game) > 1 else "Unbekannt"
-
+  
+st.markdown("---")
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
         st.image(get_team_logo(home), width=200)
@@ -41,11 +42,6 @@ def display_game_event(event, team_name):
         st.markdown(f"[🔗 Zur Spielseite]({url})")
     with col3:
         st.image(get_team_logo(away), width=200)
-    
-    st.markdown("---")
-
-
-    
     st.markdown("---")
 
 def fetch_team_schedule(team_name, team_id):
