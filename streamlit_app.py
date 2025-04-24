@@ -36,18 +36,19 @@ def extract_game_id(url):
     return parts[-1] if parts else None
 
 def get_team_games(team_id):
-    """Get all games for a team"""
     try:
-        API_URL = f"https://api-v2.swissunihockey.ch/api/team-games?team_id={team_id}"
+        API_URL = f"https://neuer-api-endpoint.ch/api/team-games?team_id={team_id}"
         response = requests.get(API_URL, headers={
             "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json"
+            "Accept": "application/json",
+            "Authorization": "Bearer YOUR_API_KEY"  # Falls benötigt
         })
         response.raise_for_status()
         return response.json()
     except Exception as e:
         st.error(f"Error fetching team games: {str(e)}")
         return None
+
 
 def format_game_data(game_data, team_id):
     """Format game data from API response"""
@@ -181,7 +182,8 @@ def fetch_team_schedule(team_name, team_id):
                 
         except Exception as e:
             st.error(f"Fehler: {str(e)}")
-
+except requests.exceptions.HTTPError as e:
+    st.error(f"HTTP Error: {e.response.status_code} - {e.response.text}")
 # Main app
 st.title("🏒 Floorball Spielplan")
 
