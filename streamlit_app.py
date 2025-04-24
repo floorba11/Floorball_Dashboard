@@ -15,7 +15,7 @@ teams = {
 
 def get_team_logo(team_name):
     """Get team logo path or return default if not found"""
-    logo_path = f"logos/{team_name.lower().replace(' ', '_')}.png"
+    logo_path = f"logos/{team_name.lower()}.png"
     return logo_path if os.path.exists(logo_path) else "logos/default.png"
 
 def display_game_event(event, team_name):
@@ -35,13 +35,13 @@ def display_game_event(event, team_name):
     # Display game info
     col1, col2, col3 = st.columns([1, 3, 1])
     with col1:
-        st.image(get_team_logo(home), width=60)
+        st.image(get_team_logo(home), width=200)
     with col2:
         st.subheader(name)
         st.caption(f"📅 {date} | 🕒 {time} | 📍 {location}")
         st.markdown(f"[🔗 Zur Spielseite]({url})")
     with col3:
-        st.image(get_team_logo(away), width=60)
+        st.image(get_team_logo(away), width=200)
     
     st.markdown("---")
 
