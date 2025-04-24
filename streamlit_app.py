@@ -15,7 +15,7 @@ TEAMS = {
 
 def get_team_logo(team_name):
     """Get team logo path or return default if not found"""
-    logo_path = f"logos/{team_name.lower().replace(' ', '_')}.png"
+    logo_path = f"logos/{team_name.lower()}.png"
     return logo_path if os.path.exists(logo_path) else "logos/default.png"
 
 def display_future_game_event(event, team_name):
@@ -87,7 +87,7 @@ def fetch_past_games(team_name, team_id):
             API_URL = f"https://api-v2.swissunihockey.ch/api/games/team/{team_id}/results"
             
             params = {
-                'season': current_year,
+                'season': 2024,
                 'limit': 5  # Letzte 5 Spiele
             }
             
