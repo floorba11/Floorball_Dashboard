@@ -1,7 +1,9 @@
 import os
 import requests
 from datetime import datetime, timedelta, timezone
+from icalendar import Calendar as ICalendar
 from ics import Calendar
+from urllib.parse import urlparse, parse_qs
 import streamlit as st
 
 # Configure page
@@ -79,64 +81,54 @@ def fetch_future_games(team_name, team_id):
             st.error(f"Unerwarteter Fehler für {team_name}: {str(e)}")
 
 def fetch_past_games(team_name, team_id):
-    """Fetch and display past games for a team"""
+    """Fetch and display past games for a team using iCal"""
     with st.spinner(f"Lade letzte Spiele für {team_name}..."):
         try:
-            # API v3 Endpoint für Spielresultate
-            API_URL = f"https://api-v2.swissunihockey.ch/api/v3/games"
-            
-            params = {
-                'team': team_id,
-                'result': 'true',  # Nur abgeschlossene Spiele
-                'limit': 5,        # Letzte 5 Spiele
-                'sort': '-date'    # Neueste zuerst
-            }
-            
-            response = requests.get(
-                API_URL,
-                headers={
-                    "User-Agent": "Mozilla/5.0",
-                    "Accept": "application/json"
-                },
-                params=params
-            )
+            # iCal Endpoint für vergangene Spiele
+            API_URL = f"https://api-v2.swissunihockey.ch/api/calendars/team/{team_id}/games"
+            response = requests.get(API_URL, headers={"User-Agent": "Mozilla/5.0"})
             response.raise_for_status()
             
-            games = response.json().get('data', [])
+            cal = ICalendar.from_ical(response.text)
+            cutoff_date = datetime.now() - timedelta(days=14)
+            past_games = []
             
-            if not games:
+            for event in cal.walk('vevent'):
+                start = event.get('dtstart').dt
+                if isinstance(start, datetime) and start <= datetime.now():
+                    game_url = str(event.get('url', ''))
+                    game_id = parse_qs(urlparse(game_url).query.get('game', [''])[0]
+                    
+                    if game_id:
+                        past_games.append({
+                            'date': start,
+                            'game_id': game_id,
+                            'summary': str(event.get('summary', ''))
+                        })
+            
+            if not past_games:
                 st.info(f"Keine Spiele in den letzten 14 Tagen für {team_name}.")
                 return
                 
             st.subheader(f"🔷 Letzte Resultate")
             
-            for game in games:
-                game_date = datetime.strptime(game['date'], "%Y-%m-%d").date() if 'date' in game else None
+            # Sort by date (newest first) and limit to 5
+            for game in sorted(past_games, key=lambda x: x['date'], reverse=True)[:5]:
+                # Try to extract teams from summary (format: "Home - Away")
+                teams = game['summary'].split(' - ') if ' - ' in game['summary'] else ['Unbekannt', 'Unbekannt']
                 
                 col1, col2 = st.columns([1, 3])
                 with col1:
-                    if game_date:
-                        st.write(f"**{game_date.strftime('%d.%m.%Y')}**")
-                    st.write(f"{game.get('time', 'N/A')}")
+                    st.write(f"**{game['date'].strftime('%d.%m.%Y')}**")
                 with col2:
-                    home_team = game.get('home_team', {}).get('name', 'N/A')
-                    away_team = game.get('away_team', {}).get('name', 'N/A')
-                    st.write(f"**{home_team} vs {away_team}**")
-                    
-                    if game.get('status') == 'finished':
-                        home_goals = game.get('home_goals', 'N/A')
-                        away_goals = game.get('away_goals', 'N/A')
-                        st.write(f"Resultat: {home_goals} - {away_goals}")
-                    else:
-                        st.write("Spielstatus: " + game.get('status', 'N/A'))
-                    
-                    st.write(f"Ort: {game.get('venue', {}).get('name', 'N/A')}")
+                    st.write(f"**{teams[0]} vs {teams[1]}**")
+                    st.write(f"Spiel-ID: {game['game_id']}")
+                    st.markdown(f"[🔗 Zum Spielbericht](https://www.swissunihockey.ch/game/{game['game_id']})", unsafe_allow_html=True)
                 
                 st.divider()
                 
         except requests.exceptions.RequestException as e:
             st.error(f"Fehler beim Abrufen der letzten Spiele für {team_name}: {str(e)}")
-            st.error(f"API Response: {response.text}")  # Debug-Ausgabe
         except Exception as e:
             st.error(f"Unerwarteter Fehler für {team_name}: {str(e)}")
 
