@@ -1,3 +1,5 @@
 streamlit
 requests
 ics
+icalendar>=4.1.1
+requests>=2.28.1
