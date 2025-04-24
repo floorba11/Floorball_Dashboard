@@ -32,32 +32,20 @@ def display_game_event(event, team_name):
     home = teams_in_game[0].strip()
     away = teams_in_game[1].strip() if len(teams_in_game) > 1 else "Unbekannt"
 
-    # Display game info
-    col1, col2, col3, col4 = st.columns([1, 3, 1, 1])
+            col1, col2, col3 = st.columns([1, 3, 1])
+            with col1:
+                st.image(get_team_logo(home), width=60)
+            with col2:
+                st.subheader(name)
+            with col3:
+                st.image(get_team_logo(away), width=60)
 
-# Logos
-with col1:
-    st.image(get_team_logo(home), width=50)
-with col4:
-    st.image(get_team_logo(away), width=50)
+            st.write(f"📅 Datum: {date}")
+            st.write(f"🕒 Uhrzeit: {time}")
+            st.write(f"📍 Ort: {location}")
+            st.markdown(f"🔗 [Zur Spielseite]({url})")
+            st.markdown("---")
 
-# Spielinfo (Datum, Uhrzeit, Teams)
-with col2:
-    st.markdown(f"**{date} – {time}**<br>{home.title()} vs. {away.title()}", unsafe_allow_html=True)
-    st.write(f"📍 {location}")
-    if url != "#":
-        st.markdown(f"[Spielseite]({url})")
-
-# Resultat
-with col3:
-    result = "-"
-    # Versuche, Resultat aus SUMMARY zu ziehen (z. B. "Tigers Langnau 5:4 Floorball Thurgau")
-    parts = name.split()
-    for p in parts:
-        if ":" in p:
-            result = p
-            break
-    st.subheader(result)
 
     
     st.markdown("---")
