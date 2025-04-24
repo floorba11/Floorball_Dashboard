@@ -33,7 +33,7 @@ def display_game_event(event, team_name):
     away = teams_in_game[1].strip() if len(teams_in_game) > 1 else "Unbekannt"
   
     st.markdown("---")
-    col1, col2, col3 = st.columns([1, 3, 1])
+    col1, col2, col3 = st.columns([1, 5, 1])
     with col1:
         st.image(get_team_logo(home), width=200)
     with col2:
