@@ -37,16 +37,16 @@ def display_game_event(event, team_name):
     with col1:
         st.image(get_team_logo(home), width=200)
     with col2:
-    st.markdown(
-        f"""
-        <div style='text-align: center'>
-            <h4>{name}</h4>
-            <p>📅 {date} | 🕒 {time} | 📍 {location}</p>
-            <a href="{url}">🔗 Zur Spielseite</a>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+        st.markdown(
+            f"""
+            <div style='text-align: center'>
+                <h4>{name}</h4>
+                <p>📅 {date} | 🕒 {time} | 📍 {location}</p>
+                <a href="{url}">🔗 Zur Spielseite</a>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
     with col3:
         st.image(get_team_logo(away), width=200)
     st.markdown("---")
