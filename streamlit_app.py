@@ -75,7 +75,7 @@ def fetch_team_schedule(team_name, team_id):
             st.error(f"Unerwarteter Fehler für {team_name}: {str(e)}")
 
 # Main app
-st.title("🏒 Floorball Spielplan")
+st.title("🏒 Spielplan")
 
 # Display schedule for each team
 for team_name, team_id in teams.items():
