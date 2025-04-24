@@ -16,8 +16,11 @@ teams = {
 def get_game_details(game_id):
     """Fetch detailed game information from API"""
     try:
-        API_URL = f"https://api-v2.swissunihockey.ch/api/games/{game_id}"
-        response = requests.get(API_URL, headers={"User-Agent": "Mozilla/5.0"})
+        API_URL = f"https://api-v2.swissunihockey.ch/api/game-detail?game_id={game_id}"
+        response = requests.get(API_URL, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json"
+        })
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -26,48 +29,39 @@ def get_game_details(game_id):
 
 def extract_game_id(url):
     """Extract game ID from URL"""
-    parts = url.split('/')
+    # Example URL format: https://www.swissunihockey.ch/game-center/game/1073714/
+    if not url:
+        return None
+    parts = url.rstrip('/').split('/')
     return parts[-1] if parts else None
 
-def get_last_game(team_id):
-    """Find the last played game for a team"""
+def get_team_games(team_id):
+    """Get all games for a team"""
     try:
-        # Get team's calendar to find recent games
-        API_URL = f"http://api-v2.swissunihockey.ch/api/calendars?team_id={team_id}"
-        response = requests.get(API_URL, headers={"User-Agent": "Mozilla/5.0"})
+        API_URL = f"https://api-v2.swissunihockey.ch/api/team-games?team_id={team_id}"
+        response = requests.get(API_URL, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json"
+        })
         response.raise_for_status()
-        
-        calendar = Calendar(response.text)
-        now = datetime.now(timezone.utc)
-        
-        # Get all past games sorted by date (newest first)
-        past_events = sorted(
-            [e for e in calendar.events if e.begin < now and e.url],
-            key=lambda e: e.begin,
-            reverse=True
-        )
-        
-        if past_events:
-            game_id = extract_game_id(past_events[0].url)
-            return get_game_details(game_id) if game_id else None
-        return None
+        return response.json()
     except Exception as e:
-        st.error(f"Error finding last game: {str(e)}")
+        st.error(f"Error fetching team games: {str(e)}")
         return None
 
 def format_game_data(game_data, team_id):
     """Format game data from API response"""
-    if not game_data or not game_data.get('data'):
+    if not game_data:
         return None
         
-    attributes = game_data['data']['attributes']
-    home_team = attributes.get('home_team', {})
-    away_team = attributes.get('away_team', {})
+    attributes = game_data.get('game', {})
+    home_team = attributes.get('homeTeam', {})
+    away_team = attributes.get('awayTeam', {})
     
     # Determine if our team won (for past games)
-    is_home = home_team.get('id') == team_id
-    home_score = attributes.get('home_team_score')
-    away_score = attributes.get('away_team_score')
+    is_home = home_team.get('teamId') == team_id
+    home_score = attributes.get('homeScore')
+    away_score = attributes.get('awayScore')
     
     result = None
     if home_score is not None and away_score is not None:
@@ -75,17 +69,17 @@ def format_game_data(game_data, team_id):
         result = f"{'W' if won else 'L'} {home_score}-{away_score}"
     
     return {
-        'game_id': game_data['data']['id'],
-        'date': attributes.get('start_time'),
-        'home_team': home_team.get('name', 'Unbekannt'),
-        'away_team': away_team.get('name', 'Unbekannt'),
-        'home_logo': home_team.get('logo_url'),
-        'away_logo': away_team.get('logo_url'),
-        'location': attributes.get('location'),
+        'game_id': attributes.get('gameId'),
+        'date': attributes.get('startTime'),
+        'home_team': home_team.get('teamName', 'Unbekannt'),
+        'away_team': away_team.get('teamName', 'Unbekannt'),
+        'home_logo': home_team.get('logoUrl'),
+        'away_logo': away_team.get('logoUrl'),
+        'location': attributes.get('venueName'),
         'result': result,
         'spectators': attributes.get('spectators'),
-        'period_scores': attributes.get('period_scores'),
-        'url': attributes.get('gamecenter_url')
+        'period_scores': attributes.get('periodScores'),
+        'url': f"https://www.swissunihockey.ch/game-center/game/{attributes.get('gameId')}/"
     }
 
 def display_game(game, team_name, is_past=False):
@@ -95,8 +89,12 @@ def display_game(game, team_name, is_past=False):
         return
     
     # Format date and time
-    game_date = datetime.fromisoformat(game['date']).strftime("%d.%m.%Y")
-    game_time = datetime.fromisoformat(game['date']).strftime("%H:%M")
+    try:
+        game_date = datetime.fromisoformat(game['date']).strftime("%d.%m.%Y")
+        game_time = datetime.fromisoformat(game['date']).strftime("%H:%M")
+    except:
+        game_date = "Unbekannt"
+        game_time = "Unbekannt"
     
     with st.container():
         col1, col2, col3 = st.columns([1, 3, 1])
@@ -119,7 +117,7 @@ def display_game(game, team_name, is_past=False):
                 
                 if game.get('period_scores'):
                     periods = " | ".join(
-                        [f"{p['period']}: {p['home_score']}-{p['away_score']}" 
+                        [f"{p['periodNumber']}: {p['homeScore']}-{p['awayScore']}" 
                         for p in game['period_scores']]
                     )
                     st.caption(f"Perioden: {periods}")
@@ -141,41 +139,48 @@ def fetch_team_schedule(team_name, team_id):
     """Fetch and display schedule for a single team"""
     with st.spinner(f"Lade Spiele für {team_name}..."):
         try:
-            # Get last played game
-            st.subheader("Letztes Spiel")
-            last_game_raw = get_last_game(team_id)
-            last_game = format_game_data(last_game_raw, team_id)
-            display_game(last_game, team_name, is_past=True)
-            
-            # Get upcoming games
-            API_URL = f"http://api-v2.swissunihockey.ch/api/calendars?team_id={team_id}"
-            response = requests.get(API_URL, headers={"User-Agent": "Mozilla/5.0"})
-            response.raise_for_status()
-            
-            calendar = Calendar(response.text)
+            # Get all games for team
+            games_data = get_team_games(team_id)
+            if not games_data:
+                st.error("Keine Spieldaten erhalten")
+                return
+                
             now = datetime.now(timezone.utc)
             
-            # Get future games with API details
-            future_events = sorted(
-                [e for e in calendar.events if e.begin >= now and e.url],
-                key=lambda e: e.begin
-            )[:3]
+            # Separate past and future games
+            past_games = []
+            future_games = []
             
-            if future_events:
-                st.subheader("Kommende Spiele")
-                for event in future_events:
-                    game_id = extract_game_id(event.url)
-                    if game_id:
-                        game_data = get_game_details(game_id)
-                        formatted_game = format_game_data(game_data, team_id)
-                        display_game(formatted_game, team_name, is_past=False)
+            for game in games_data.get('games', []):
+                try:
+                    game_time = datetime.fromisoformat(game.get('startTime'))
+                    if game_time < now:
+                        past_games.append(game)
+                    else:
+                        future_games.append(game)
+                except:
+                    continue
+            
+            # Display last game
+            st.subheader("Letztes Spiel")
+            if past_games:
+                last_game = sorted(past_games, key=lambda x: x.get('startTime'), reverse=True)[0]
+                formatted_game = format_game_data({'game': last_game}, team_id)
+                display_game(formatted_game, team_name, is_past=True)
             else:
-                st.info("Keine kommenden Spiele geplant.")
+                st.info("Keine vergangenen Spiele gefunden")
+            
+            # Display next games
+            st.subheader("Kommende Spiele")
+            if future_games:
+                for game in sorted(future_games, key=lambda x: x.get('startTime'))[:3]:
+                    formatted_game = format_game_data({'game': game}, team_id)
+                    display_game(formatted_game, team_name, is_past=False)
+            else:
+                st.info("Keine kommenden Spiele gefunden")
                 
-        except requests.exceptions.RequestException as e:
-            st.error(f"Fehler beim Abrufen der Daten für {team_name}: {str(e)}")
         except Exception as e:
-            st.error(f"Unerwarteter Fehler für {team_name}: {str(e)}")
+            st.error(f"Fehler: {str(e)}")
 
 # Main app
 st.title("🏒 Floorball Spielplan")
