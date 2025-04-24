@@ -9,7 +9,7 @@ st.set_page_config(page_title="Team Schedule", page_icon="🏒", layout="wide")
 
 # List of teams: name + team_id
 teams = {
-    "Tigers LUPL": 429523,
+    "Tigers Langnau LUPL": 429523,
     "Herren Frutigen": 429611,
 }
 
