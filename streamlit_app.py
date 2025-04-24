@@ -32,32 +32,17 @@ def display_game_event(event, team_name):
     home = teams_in_game[0].strip()
     away = teams_in_game[1].strip() if len(teams_in_game) > 1 else "Unbekannt"
   
-st.markdown("---")
-
-col1, col2, col3 = st.columns([1, 5, 1])
-
-with col1:
-    st.image(get_team_logo(home), width=200)
-
-with col2:
-    # alles in einen zentrierten DIV packen
-    st.markdown(
-        f"""
-        <div style="text-align:center;">
-            <h3 style="margin-bottom:0.2rem;">{name}</h3>
-            <span style="font-size:0.9rem; color:gray;">
-                📅 {date} &nbsp;|&nbsp; 🕒 {time} &nbsp;|&nbsp; 📍 {location}
-            </span><br>
-            <a href="{url}" target="_blank" style="text-decoration:none;">🔗 Zur&nbsp;Spielseite</a>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-with col3:
-    st.image(get_team_logo(away), width=200)
-
-st.markdown("---")
+    st.markdown("---")
+    col1, col2, col3 = st.columns([1, 5, 1])
+    with col1:
+        st.image(get_team_logo(home), width=200)
+    with col2:
+        st.subheader(name)
+        st.caption(f"📅 {date} | 🕒 {time} | 📍 {location}")
+        st.markdown(f"[🔗 Zur Spielseite]({url})")
+    with col3:
+        st.image(get_team_logo(away), width=200)
+    st.markdown("---")
 
 
 def fetch_team_schedule(team_name, team_id):
