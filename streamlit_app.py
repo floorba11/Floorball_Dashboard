@@ -15,7 +15,7 @@ TEAMS = {
 
 def get_team_logo(team_name):
     """Get team logo path or return default if not found"""
-    logo_path = f"logos/{team_name.lower()}.png"
+    logo_path = f"logos/{team_name.lower().replace(' ', '_')}.png"
     return logo_path if os.path.exists(logo_path) else "logos/default.png"
 
 def display_future_game_event(event, team_name):
@@ -82,17 +82,22 @@ def fetch_past_games(team_name, team_id):
     """Fetch and display past games for a team"""
     with st.spinner(f"Lade letzte Spiele für {team_name}..."):
         try:
-            # Neue API-Anfrage mit korrekten Parametern
-            current_year = datetime.now().year
-            API_URL = f"https://api-v2.swissunihockey.ch/api/games/team/{team_id}/results"
+            # API v3 Endpoint für Spielresultate
+            API_URL = f"https://api-v2.swissunihockey.ch/api/v3/games"
             
             params = {
-                'season': 2024,
+                'team': team_id,
+                'result': 'true',  # Nur abgeschlossene Spiele
+                'limit': 5,        # Letzte 5 Spiele
+                'sort': '-date'    # Neueste zuerst
             }
             
             response = requests.get(
                 API_URL,
-                headers={"User-Agent": "Mozilla/5.0"},
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "application/json"
+                },
                 params=params
             )
             response.raise_for_status()
@@ -131,6 +136,7 @@ def fetch_past_games(team_name, team_id):
                 
         except requests.exceptions.RequestException as e:
             st.error(f"Fehler beim Abrufen der letzten Spiele für {team_name}: {str(e)}")
+            st.error(f"API Response: {response.text}")  # Debug-Ausgabe
         except Exception as e:
             st.error(f"Unerwarteter Fehler für {team_name}: {str(e)}")
 
