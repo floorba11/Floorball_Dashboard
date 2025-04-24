@@ -88,7 +88,6 @@ def fetch_past_games(team_name, team_id):
             
             params = {
                 'season': 2024,
-                'limit': 5  # Letzte 5 Spiele
             }
             
             response = requests.get(
