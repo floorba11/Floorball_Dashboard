@@ -32,44 +32,17 @@ def display_game_event(event, team_name):
     home = teams_in_game[0].strip()
     away = teams_in_game[1].strip() if len(teams_in_game) > 1 else "Unbekannt"
 
-                with st.container():
-        col1, col2, col3 = st.columns([1, 3, 1])
-        
-        # Home team column
-        with col1:
-            if game.get('home_logo'):
-                st.image(game['home_logo'], width=60)
-        
-        # Game info column
-        with col2:
-            st.subheader(f"{game['home_team']} vs {game['away_team']}")
-            st.caption(f"📅 {game_date} | 🕒 {game_time}")
-            
-            if game.get('location'):
-                st.caption(f"📍 {game['location']}")
-            
-            if is_past and game.get('result'):
-                st.markdown(f"## {game['result']}")
-                
-                if game.get('period_scores'):
-                    periods = " | ".join(
-                        [f"{p['period']}: {p['home_score']}-{p['away_score']}" 
-                        for p in game['period_scores']]
-                    )
-                    st.caption(f"Perioden: {periods}")
-                
-                if game.get('spectators'):
-                    st.caption(f"👥 Zuschauer: {game['spectators']}")
-            else:
-                if game.get('url'):
-                    st.markdown(f"[🔗 Zum Spielcenter]({game['url']})")
-        
-        # Away team column
-        with col3:
-            if game.get('away_logo'):
-                st.image(game['away_logo'], width=60)
-        
-        st.markdown("---")
+                col1, col2, col3 = st.columns([1, 3, 1])
+    with col1:
+        st.image(get_team_logo(home), width=60)
+    with col2:
+        st.subheader(name)
+        st.caption(f"📅 {date} | 🕒 {time} | 📍 {location}")
+        st.markdown(f"[🔗 Zur Spielseite]({url})")
+    with col3:
+        st.image(get_team_logo(away), width=60)
+    
+    st.markdown("---")
 
 
     
