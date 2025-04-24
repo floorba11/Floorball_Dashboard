@@ -91,6 +91,8 @@ for team_name, team_id in teams.items():
     st.write("")  # Add some space between teams
 
 
+
+
 # Main app
 st.title("🏒 Resultate")
 import requests
