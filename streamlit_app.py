@@ -32,15 +32,15 @@ def display_game_event(event, team_name):
     home = teams_in_game[0].strip()
     away = teams_in_game[1].strip() if len(teams_in_game) > 1 else "Unbekannt"
 
-    col1, col2, col3 = st.columns([1, 3, 1])
+    col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
-        st.image(get_team_logo(home), width=60)
+        st.image(get_team_logo(home), width=200)
     with col2:
         st.subheader(name)
         st.caption(f"📅 {date} | 🕒 {time} | 📍 {location}")
         st.markdown(f"[🔗 Zur Spielseite]({url})")
     with col3:
-        st.image(get_team_logo(away), width=60)
+        st.image(get_team_logo(away), width=200)
     
     st.markdown("---")
 
