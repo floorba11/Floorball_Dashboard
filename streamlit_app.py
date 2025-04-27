@@ -24,11 +24,15 @@ def fetch_game_events(game_id):
     """Fetch live events for a specific game"""
     url = f"https://api-v2.swissunihockey.ch/api/game/{game_id}/events/"
     try:
-        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        response = requests.get(url, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json"
+        })
+        
         if response.status_code == 200:
             return response.json()
         else:
-            st.error(f"Fehler beim Abrufen der Spielevents: {response.status_code}")
+            st.error(f"Fehler beim Abrufen der Spielevents (Status {response.status_code}): {response.text}")
             return None
     except Exception as e:
         st.error(f"Fehler bei der API-Anfrage: {str(e)}")
@@ -37,6 +41,7 @@ def fetch_game_events(game_id):
 def display_live_events(events):
     """Display live game events in Streamlit"""
     if not events or "events" not in events:
+        st.warning("Keine Live-Events verfügbar")
         return
     
     event_container = st.container()
@@ -59,6 +64,8 @@ def display_live_events(events):
             elif event_type == "PERIOD_END":
                 period = event.get("period", "1")
                 st.info(f"⏹️ {period}. Spielabschnitt beendet")
+            else:
+                st.write(f"{event_time} - {event_type}: {team} - {player}")
 
 def display_future_game_event(event, team_name):
     """Display a single future game event in Streamlit"""
@@ -72,7 +79,10 @@ def display_future_game_event(event, team_name):
     home = teams_in_game[0].strip()
     away = teams_in_game[1].strip() if len(teams_in_game) > 1 else "Unbekannt"
     
-    game_id = url.split("/")[-1] if url else None
+    # Extract game ID from URL
+    game_id = None
+    if url and "/game/" in url:
+        game_id = url.split("/game/")[-1].split("/")[0]
     
     st.markdown("---")
     col1, col2, col3 = st.columns([1, 5, 1])
@@ -93,31 +103,44 @@ def display_future_game_event(event, team_name):
         st.image(get_team_logo(away), width=200)
     
     # Check if game is live (started but not finished)
-    game_time = event.begin.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
-    
-    if game_time <= now <= game_time + timedelta(hours=3) and game_id:
-        st.subheader("🔴 Live Ticker")
-        live_placeholder = st.empty()
+    if hasattr(event.begin, 'replace'):
+        game_time = event.begin.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         
-        # Simple polling mechanism for live updates
-        last_events_count = 0
-        while True:
+        # Debug information
+        st.write(f"Spielzeit: {game_time}")
+        st.write(f"Aktuelle Zeit: {now}")
+        st.write(f"Game ID: {game_id}")
+        
+        if game_id and game_time <= now <= game_time + timedelta(hours=3):
+            st.subheader("🔴 Live Ticker")
+            live_placeholder = st.empty()
+            
+            # Initial fetch to get current events
             events_data = fetch_game_events(game_id)
             if events_data and "events" in events_data:
-                current_events = events_data["events"]
-                if len(current_events) > last_events_count:
-                    new_events = {"events": current_events[last_events_count:]}
-                    with live_placeholder.container():
-                        display_live_events(new_events)
-                    last_events_count = len(current_events)
+                last_events_count = len(events_data["events"])
+                display_live_events(events_data)
+            else:
+                last_events_count = 0
             
-            # Check if game is likely finished (3 hours after start)
-            if now > game_time + timedelta(hours=3):
-                st.info("Spiel beendet")
-                break
+            # Simple polling mechanism for live updates
+            while True:
+                events_data = fetch_game_events(game_id)
+                if events_data and "events" in events_data:
+                    current_events = events_data["events"]
+                    if len(current_events) > last_events_count:
+                        new_events = {"events": current_events[last_events_count:]}
+                        with live_placeholder.container():
+                            display_live_events(new_events)
+                        last_events_count = len(current_events)
                 
-            time.sleep(10)  # Refresh every 10 seconds
+                # Check if game is likely finished (3 hours after start)
+                if now > game_time + timedelta(hours=3):
+                    st.info("Spiel beendet")
+                    break
+                    
+                time.sleep(10)  # Refresh every 10 seconds
     
     st.markdown("---")
     return game_id
