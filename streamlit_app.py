@@ -48,34 +48,73 @@ def extract_game_id(url):
         st.sidebar.error(f"Keine Game ID in URL gefunden: {url}")
     return None
 
-def fetch_game_events(game_id):
-    """Fetch live events for a specific game"""
-    if DEBUG:
-        st.sidebar.write(f"📡 API-Aufruf für Game ID: {game_id}")
-    
+def fetch_past_games(team_name, team_id):
+    """Fetch and display past games for a team"""
     try:
-        url = f"https://api.swissunihockey.ch/api/game/{game_id}/events/"
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json",
-            "Referer": "https://www.swissunihockey.ch/"
-        }
-        
-        response = requests.get(url, headers=headers, timeout=5)
-        
-        if DEBUG:
-            st.sidebar.write(f"API Status: {response.status_code}")
-            if response.status_code == 200:
-                st.sidebar.json(response.json())
-        
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(f"API Error {response.status_code}: {response.text[:200]}...")
-            return None
+        with st.spinner(f"Lade vergangene Spiele für {team_name}..."):
+            # API-Endpunkt aktualisiert
+            API_URL = "https://api.swissunihockey.ch/api/v3/games"
+            
+            params = {
+                'team': team_id,
+                'result': 'true',
+                'limit': 5,
+                'sort': '-date'
+            }
+            
+            headers = {
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
+                "Referer": "https://www.swissunihockey.ch/"
+            }
+            
+            response = requests.get(API_URL, headers=headers, params=params, timeout=10)
+            response.raise_for_status()  # Wirft Exception für 4xx/5xx Responses
+            
+            games = response.json().get('data', [])
+            
+            if not games:
+                st.info(f"Keine vergangenen Spiele für {team_name} gefunden.")
+                return
+            
+            st.subheader("⏮️ Letzte Spiele")
+            
+            for game in games:
+                try:
+                    # Sicherere Datenabfrage mit get()
+                    game_date = datetime.strptime(game.get('date'), "%Y-%m-%d").date() if game.get('date') else None
+                    game_time = game.get('time', 'N/A')
+                    
+                    home_team = game.get('home_team', {}).get('name', 'Unbekannt')
+                    away_team = game.get('away_team', {}).get('name', 'Unbekannt')
+                    venue = game.get('venue', {}).get('name', 'Unbekannter Ort')
+                    
+                    col1, col2 = st.columns([1, 3])
+                    with col1:
+                        if game_date:
+                            st.write(f"**{game_date.strftime('%d.%m.%Y')}**")
+                        st.write(game_time)
+                    
+                    with col2:
+                        st.write(f"**{home_team} vs {away_team}**")
+                        
+                        if game.get('status') == 'finished':
+                            st.write(f"🏒 {game.get('home_goals', 'N/A')} - {game.get('away_goals', 'N/A')}")
+                        else:
+                            st.write(f"Status: {game.get('status', 'N/A')}")
+                        
+                        st.write(f"📍 {venue}")
+                    
+                    st.divider()
+                
+                except Exception as game_error:
+                    st.error(f"Fehler beim Anzeigen eines Spiels: {str(game_error)}")
+                    continue
+    
+    except requests.exceptions.RequestException as e:
+        st.error(f"Netzwerkfehler beim Abrufen der Spiele für {team_name}: {str(e)}")
     except Exception as e:
-        st.error(f"Request failed: {str(e)}")
-        return None
+        st.error(f"Unerwarteter Fehler für {team_name}: {str(e)}")
 
 def display_single_event(event):
     """Zeigt ein einzelnes Spielereignis an"""
