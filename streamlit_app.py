@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from ics import Calendar
 import streamlit as st
+import re
 
 # Configure page
 st.set_page_config(page_title="Team Schedule & Live Ticker", page_icon="🏒", layout="wide")
@@ -17,7 +18,8 @@ TEAMS = {
 
 def get_team_logo(team_name):
     """Get team logo path or return default if not found"""
-    logo_path = f"logos/{team_name.lower()}.png"
+    normalized_name = team_name.lower()
+    logo_path = f"logos/{normalized_name}.png"
     return logo_path if os.path.exists(logo_path) else "logos/default.png"
 
 def fetch_game_events(game_id):
@@ -32,125 +34,118 @@ def fetch_game_events(game_id):
         if response.status_code == 200:
             return response.json()
         else:
-            st.error(f"Fehler beim Abrufen der Spielevents (Status {response.status_code}): {response.text}")
+            st.error(f"API Error {response.status_code}: {response.text[:200]}...")
             return None
     except Exception as e:
-        st.error(f"Fehler bei der API-Anfrage: {str(e)}")
+        st.error(f"Request failed: {str(e)}")
         return None
 
-def display_live_events(events):
-    """Display live game events in Streamlit"""
-    if not events or "events" not in events:
-        st.warning("Keine Live-Events verfügbar")
+def display_live_events(game_id):
+    """Display and continuously update live game events"""
+    if not game_id:
         return
     
-    event_container = st.container()
+    placeholder = st.empty()
+    last_events_count = 0
     
-    for event in events["events"]:
-        event_type = event.get("type")
-        event_time = event.get("time", "")
-        team = event.get("team", {}).get("name", "Unbekannt")
-        player = event.get("player", {}).get("name", "Unbekannt")
+    while True:
+        events_data = fetch_game_events(game_id)
         
-        with event_container:
-            if event_type == "GOAL":
-                st.success(f"⚽ {team}: Tor durch {player} ({event_time})")
-            elif event_type == "PENALTY":
-                penalty_time = event.get("penaltyTime", "2")
-                st.warning(f"⚠️ {team}: Strafe gegen {player} ({penalty_time} Min)")
-            elif event_type == "PERIOD_START":
-                period = event.get("period", "1")
-                st.info(f"🔄 {period}. Spielabschnitt gestartet")
-            elif event_type == "PERIOD_END":
-                period = event.get("period", "1")
-                st.info(f"⏹️ {period}. Spielabschnitt beendet")
+        with placeholder.container():
+            if events_data and "events" in events_data:
+                current_events = events_data["events"]
+                
+                # Display all events
+                st.subheader("🔴 Live Spielereignisse")
+                for event in current_events:
+                    event_type = event.get("type")
+                    event_time = event.get("time", "")
+                    team = event.get("team", {}).get("name", "Unbekannt")
+                    player = event.get("player", {}).get("name", "Unbekannt")
+                    
+                    if event_type == "GOAL":
+                        st.success(f"⚽ {team}: Tor durch {player} ({event_time}')")
+                    elif event_type == "PENALTY":
+                        penalty_time = event.get("penaltyTime", "2")
+                        st.warning(f"⚠️ {team}: Strafe gegen {player} ({penalty_time} Min)")
+                    elif event_type == "PERIOD_START":
+                        period = event.get("period", "1")
+                        st.info(f"🔄 {period}. Drittel gestartet")
+                    elif event_type == "PERIOD_END":
+                        period = event.get("period", "1")
+                        st.info(f"⏹️ {period}. Drittel beendet")
+                
+                last_events_count = len(current_events)
             else:
-                st.write(f"{event_time} - {event_type}: {team} - {player}")
+                st.warning("Warte auf Live-Daten...")
+        
+        time.sleep(10)  # Update every 10 seconds
 
-def display_future_game_event(event, team_name):
-    """Display a single future game event in Streamlit"""
+def extract_game_id(url):
+    """Extract game ID from Swiss Unihockey URL"""
+    if not url:
+        return None
+    
+    # Try to extract from /game/ format
+    match = re.search(r'/game/(\d+)', url)
+    if match:
+        return match.group(1)
+    
+    # Try to extract from /gamecenter/ format
+    match = re.search(r'/gamecenter/(\d+)', url)
+    if match:
+        return match.group(1)
+    
+    return None
+
+def display_game_event(event, team_name):
+    """Display a game event with live ticker if active"""
     name = event.name or "Unbenanntes Spiel"
-    date = event.begin.strftime("%d.%m.%Y") if hasattr(event.begin, 'strftime') else event.begin
-    time_str = event.begin.strftime("%H:%M") if hasattr(event.begin, 'strftime') else ""
+    date = event.begin.strftime("%d.%m.%Y") if hasattr(event.begin, 'strftime') else "N/A"
+    time_str = event.begin.strftime("%H:%M") if hasattr(event.begin, 'strftime') else "N/A"
     location = event.location or "nicht angegeben"
     url = event.url or "#"
-
-    teams_in_game = name.split(" - ")
-    home = teams_in_game[0].strip()
-    away = teams_in_game[1].strip() if len(teams_in_game) > 1 else "Unbekannt"
     
-    # Extract game ID from URL
-    game_id = None
-    if url and "/game/" in url:
-        game_id = url.split("/game/")[-1].split("/")[0]
+    teams = name.split(" - ")
+    home = teams[0].strip()
+    away = teams[1].strip() if len(teams) > 1 else "Unbekannt"
+    
+    game_id = extract_game_id(url)
     
     st.markdown("---")
-    col1, col2, col3 = st.columns([1, 5, 1])
-    with col1:
-        st.image(get_team_logo(home), width=200)
-    with col2:
-        st.markdown(
-            f"""
+    cols = st.columns([1, 5, 1])
+    with cols[0]:
+        st.image(get_team_logo(home), width=120)
+    with cols[1]:
+        st.markdown(f"""
             <div style='text-align: center'>
                 <h4>{name}</h4>
                 <p>📅 {date} | 🕒 {time_str} | 📍 {location}</p>
-                <a href="{url}" target="_blank">🔗 Zur Spielseite</a>
+                <a href="{url}" target="_blank">🔗 Spielbericht</a>
             </div>
-            """,
-            unsafe_allow_html=True
-        )
-    with col3:
-        st.image(get_team_logo(away), width=200)
+        """, unsafe_allow_html=True)
+    with cols[2]:
+        st.image(get_team_logo(away), width=120)
     
-    # Check if game is live (started but not finished)
+    # Check if game is live
     if hasattr(event.begin, 'replace'):
         game_time = event.begin.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         
-        # Debug information
-        st.write(f"Spielzeit: {game_time}")
-        st.write(f"Aktuelle Zeit: {now}")
-        st.write(f"Game ID: {game_id}")
-        
+        # Game is considered live if it started in the last 3 hours
         if game_id and game_time <= now <= game_time + timedelta(hours=3):
-            st.subheader("🔴 Live Ticker")
-            live_placeholder = st.empty()
-            
-            # Initial fetch to get current events
-            events_data = fetch_game_events(game_id)
-            if events_data and "events" in events_data:
-                last_events_count = len(events_data["events"])
-                display_live_events(events_data)
-            else:
-                last_events_count = 0
-            
-            # Simple polling mechanism for live updates
-            while True:
-                events_data = fetch_game_events(game_id)
-                if events_data and "events" in events_data:
-                    current_events = events_data["events"]
-                    if len(current_events) > last_events_count:
-                        new_events = {"events": current_events[last_events_count:]}
-                        with live_placeholder.container():
-                            display_live_events(new_events)
-                        last_events_count = len(current_events)
-                
-                # Check if game is likely finished (3 hours after start)
-                if now > game_time + timedelta(hours=3):
-                    st.info("Spiel beendet")
-                    break
-                    
-                time.sleep(10)  # Refresh every 10 seconds
+            display_live_events(game_id)
     
     st.markdown("---")
-    return game_id
 
 def fetch_future_games(team_name, team_id):
-    """Fetch and display future games for a single team"""
-    with st.spinner(f"Lade zukünftige Spiele für {team_name}..."):
+    """Fetch and display future games for a team"""
+    with st.spinner(f"Lade Spiele für {team_name}..."):
         try:
-            API_URL = f"https://api-v2.swissunihockey.ch/api/calendars?team_id={team_id}"
-            response = requests.get(API_URL, headers={"User-Agent": "Mozilla/5.0"})
+            response = requests.get(
+                f"https://api-v2.swissunihockey.ch/api/calendars?team_id={team_id}",
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
             response.raise_for_status()
             
             calendar = Calendar(response.text)
@@ -162,96 +157,73 @@ def fetch_future_games(team_name, team_id):
             )
             
             if not future_events:
-                st.info(f"Keine zukünftigen Spiele für {team_name} gefunden.")
+                st.info(f"Keine kommenden Spiele für {team_name}")
                 return
             
-            # Show next game in a special section
-            st.subheader(f"🔷 Nächstes Spiel")
-            next_game = future_events[0]
-            display_future_game_event(next_game, team_name)
+            st.subheader("⏭️ Nächstes Spiel")
+            display_game_event(future_events[0], team_name)
             
-            # Show other future games if there are any
             if len(future_events) > 1:
-                st.subheader(f"🔷 Weitere zukünftige Spiele")
-                for event in future_events[1:3]:  # Show max 2 additional games
-                    display_future_game_event(event, team_name)
-                
-        except requests.exceptions.RequestException as e:
-            st.error(f"Fehler beim Abrufen der zukünftigen Spiele für {team_name}: {str(e)}")
+                st.subheader("📅 Weitere Spiele")
+                for event in future_events[1:3]:
+                    display_game_event(event, team_name)
+                    
         except Exception as e:
-            st.error(f"Unerwarteter Fehler für {team_name}: {str(e)}")
+            st.error(f"Fehler beim Laden der Spiele: {str(e)}")
 
 def fetch_past_games(team_name, team_id):
     """Fetch and display past games for a team"""
-    with st.spinner(f"Lade letzte Spiele für {team_name}..."):
+    with st.spinner(f"Lade vergangene Spiele für {team_name}..."):
         try:
-            API_URL = f"https://api-v2.swissunihockey.ch/api/v3/games"
-            
-            params = {
-                'team': team_id,
-                'result': 'true',
-                'limit': 5,
-                'sort': '-date'
-            }
-            
             response = requests.get(
-                API_URL,
+                "https://api-v2.swissunihockey.ch/api/v3/games",
+                params={
+                    'team': team_id,
+                    'result': 'true',
+                    'limit': 5,
+                    'sort': '-date'
+                },
                 headers={
                     "User-Agent": "Mozilla/5.0",
                     "Accept": "application/json"
-                },
-                params=params
+                }
             )
             response.raise_for_status()
             
             games = response.json().get('data', [])
             
             if not games:
-                st.info(f"Keine Spiele in den letzten 14 Tagen für {team_name}.")
+                st.info(f"Keine vergangenen Spiele für {team_name}")
                 return
-                
-            st.subheader(f"🔷 Letzte Resultate")
             
+            st.subheader("⏮️ Letzte Spiele")
             for game in games:
-                game_date = datetime.strptime(game['date'], "%Y-%m-%d").date() if 'date' in game else None
-                
-                col1, col2 = st.columns([1, 3])
-                with col1:
-                    if game_date:
-                        st.write(f"**{game_date.strftime('%d.%m.%Y')}**")
-                    st.write(f"{game.get('time', 'N/A')}")
-                with col2:
-                    home_team = game.get('home_team', {}).get('name', 'N/A')
-                    away_team = game.get('away_team', {}).get('name', 'N/A')
-                    st.write(f"**{home_team} vs {away_team}**")
+                cols = st.columns([1, 3])
+                with cols[0]:
+                    st.write(f"**{game.get('date', 'N/A')}**")
+                    st.write(game.get('time', 'N/A'))
+                with cols[1]:
+                    home = game.get('home_team', {}).get('name', 'N/A')
+                    away = game.get('away_team', {}).get('name', 'N/A')
+                    st.write(f"**{home} vs {away}**")
                     
                     if game.get('status') == 'finished':
-                        home_goals = game.get('home_goals', 'N/A')
-                        away_goals = game.get('away_goals', 'N/A')
-                        st.write(f"Resultat: {home_goals} - {away_goals}")
+                        st.write(f"🏒 {game.get('home_goals', 'N/A')} - {game.get('away_goals', 'N/A')}")
                     else:
-                        st.write("Spielstatus: " + game.get('status', 'N/A'))
+                        st.write(f"Status: {game.get('status', 'N/A')}")
                     
-                    st.write(f"Ort: {game.get('venue', {}).get('name', 'N/A')}")
+                    st.write(f"📍 {game.get('venue', {}).get('name', 'N/A')}")
                 
                 st.divider()
                 
-        except requests.exceptions.RequestException as e:
-            st.error(f"Fehler beim Abrufen der letzten Spiele für {team_name}: {str(e)}")
         except Exception as e:
-            st.error(f"Unerwarteter Fehler für {team_name}: {str(e)}")
+            st.error(f"Fehler beim Laden der Spiele: {str(e)}")
 
 # Main app
-st.title("🏒 Swiss Unihockey Team Übersicht mit Live Ticker")
+st.title("🏒 Swiss Unihockey Dashboard")
 
-# Display schedule for each team
 for team_name, team_id in TEAMS.items():
-    st.header(f"{team_name}")
-    
-    # First show past games
+    st.header(team_name)
     fetch_past_games(team_name, team_id)
-    
-    # Then show future games (includes live ticker for next game if live)
     fetch_future_games(team_name, team_id)
-    
-    st.write("")  # Add some space between teams
+    st.write("")
