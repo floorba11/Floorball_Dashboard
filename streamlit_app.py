@@ -90,7 +90,7 @@ def fetch_past_games(team_name, team_id):
             # Get current season (format: 2024 for 2024/2025 season)
             current_year = datetime.now().year
             current_month = datetime.now().month
-            season = current_year if current_month >= 9 else current_year - 1  # Assuming season starts August
+            season = current_year if current_month >= 9 else current_year - 1  # Assuming season starts September
             
             params = {
                 'mode': 'team',
@@ -113,7 +113,7 @@ def fetch_past_games(team_name, team_id):
             games = response.json().get('data', [])
             
             # Filter to only include games from the last 14 days
-            date_14_days_ago = (datetime.now() - timedelta(days=14)).date()
+            date_14_days_ago = (datetime.now() - timedelta(days=365)).date()
             recent_games = [
                 game for game in games 
                 if 'date' in game and 
@@ -126,7 +126,7 @@ def fetch_past_games(team_name, team_id):
                 
             st.subheader(f"🔷 Letzte Resultate")
             
-            for game in recent_games[:5]:  # Ensure we only show max 5 games
+            for game in recent_games[:2]:  # Ensure we only show max 5 games
                 game_date = datetime.strptime(game['date'], "%Y-%m-%d").date() if 'date' in game else None
                 
                 col1, col2 = st.columns([1, 3])
