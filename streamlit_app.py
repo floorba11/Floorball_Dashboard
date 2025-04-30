@@ -16,7 +16,7 @@ TEAMS = {
 
 def get_team_logo(team_name):
     """Get team logo path or return default if not found"""
-    normalized_name = team_name.lower()
+    normalized_name = team_name.lower().replace(" ", "_")
     logo_path = f"logos/{normalized_name}.png"
     return logo_path if os.path.exists(logo_path) else "logos/default.png"
 
@@ -64,7 +64,7 @@ def fetch_future_games(team_name, team_id):
             calendar = Calendar(response.text)
             now = datetime.now(timezone.utc)
             
-            # Filter and sort future events
+            # Filter future events and sort them ASCENDING (next first)
             future_events = sorted(
                 [e for e in calendar.events if e.begin > now],
                 key=lambda e: e.begin
@@ -74,7 +74,17 @@ def fetch_future_games(team_name, team_id):
                 st.info(f"Keine kommenden Spiele für {team_name}")
                 return
             
-            # Display next game
+            # SPECIAL HANDLING FOR TIGERS LANGNAU
+            if team_name == "Tigers Langnau LUPL":
+                # Filter out events that are too far in the future (potential issue with calendar)
+                cutoff_date = now + timedelta(days=180)  # 6 months in future
+                future_events = [e for e in future_events if e.begin < cutoff_date]
+                
+                if not future_events:
+                    st.info(f"Keine kommenden Spiele für {team_name} in den nächsten 6 Monaten")
+                    return
+            
+            # Display next game (first in the sorted list)
             st.subheader("⏭️ Nächstes Spiel")
             display_game_event(future_events[0], team_name)
             
