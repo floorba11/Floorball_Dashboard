@@ -61,10 +61,11 @@ def fetch_future_games(team_name, team_id):
             calendar = Calendar(response.text)
             now = datetime.now(timezone.utc)
             
+            # Get all future events and sort by date (closest first)
             future_events = sorted(
                 [e for e in calendar.events if e.begin > now],
                 key=lambda e: e.begin
-            )[:3]
+            )[:3]  # Limit to next 3 games
             
             if not future_events:
                 st.info(f"Keine zukünftigen Spiele für {team_name} gefunden.")
@@ -83,14 +84,19 @@ def fetch_past_games(team_name, team_id):
     """Fetch and display past games for a team"""
     with st.spinner(f"Lade letzte Spiele für {team_name}..."):
         try:
-            # API v3 Endpoint für Spielresultate
-            API_URL = f"https://api-v2.swissunihockey.ch/api/v3/games"
+            # Using API v2 endpoint for games
+            API_URL = f"https://api-v2.swissunihockey.ch/api/games"
+            
+            # Calculate date 14 days ago for filtering
+            date_14_days_ago = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
             
             params = {
                 'team': team_id,
-                'result': 'true',  # Nur abgeschlossene Spiele
-                'limit': 5,        # Letzte 5 Spiele
-                'sort': '-date'    # Neueste zuerst
+                'played': 'true',  # Only played games
+                'from': date_14_days_ago,
+                'limit': 5,         # Last 5 games
+                'sort': 'date',    # Sort by date (descending)
+                'order': 'desc'     # Newest first
             }
             
             response = requests.get(
