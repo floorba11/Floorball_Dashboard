@@ -16,7 +16,7 @@ TEAMS = {
 
 def get_team_logo(team_name):
     """Get team logo path or return default if not found"""
-    normalized_name = team_name.lower().replace(" ", "_")
+    normalized_name = team_name.lower()
     logo_path = f"logos/{normalized_name}.png"
     return logo_path if os.path.exists(logo_path) else "logos/default.png"
 
