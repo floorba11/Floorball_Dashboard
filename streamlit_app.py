@@ -13,7 +13,7 @@ st.set_page_config(page_title="Team Schedule & Live Ticker", page_icon="🏒", l
 TEAMS = {
     "Tigers Langnau LUPL": 429523,
     "Herren Frutigen": 429611,
-    "Jets Damen": 431166,
+    "Regio Entlebuch": 432526,
 }
 
 def get_team_logo(team_name):
