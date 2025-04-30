@@ -87,17 +87,17 @@ def fetch_past_games(team_name, team_id):
             # Using API v2 endpoint for games
             API_URL = f"https://api-v2.swissunihockey.ch/api/games"
             
-            # Calculate date 14 days ago for filtering
-            date_14_days_ago = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+            # Get current season (format: 2024 for 2024/2025 season)
+            current_year = datetime.now().year
+            current_month = datetime.now().month
+            season = current_year if current_month >= 9 else current_year - 1  # Assuming season starts August
             
             params = {
-                'mode': 'team',  # Required parameter
-                'team': team_id,
-                'played': 'true',  # Only played games
-                'from': date_14_days_ago,
-                'limit': 5,       # Last 5 games
-                'sort': 'date',   # Sort by date
-                'order': 'desc'   # Newest first
+                'mode': 'team',
+                'team_id': team_id,  # Changed from 'team' to 'team_id'
+                'season': season,    # Added season parameter
+                'played': 'true',    # Only played games
+                'limit': 2           # Last 2 games
             }
             
             response = requests.get(
@@ -112,13 +112,21 @@ def fetch_past_games(team_name, team_id):
             
             games = response.json().get('data', [])
             
-            if not games:
+            # Filter to only include games from the last 14 days
+            date_14_days_ago = (datetime.now() - timedelta(days=14)).date()
+            recent_games = [
+                game for game in games 
+                if 'date' in game and 
+                datetime.strptime(game['date'], "%Y-%m-%d").date() >= date_14_days_ago
+            ]
+            
+            if not recent_games:
                 st.info(f"Keine Spiele in den letzten 14 Tagen für {team_name}.")
                 return
                 
             st.subheader(f"🔷 Letzte Resultate")
             
-            for game in games:
+            for game in recent_games[:5]:  # Ensure we only show max 5 games
                 game_date = datetime.strptime(game['date'], "%Y-%m-%d").date() if 'date' in game else None
                 
                 col1, col2 = st.columns([1, 3])
@@ -144,11 +152,10 @@ def fetch_past_games(team_name, team_id):
                 
         except requests.exceptions.RequestException as e:
             st.error(f"Fehler beim Abrufen der letzten Spiele für {team_name}: {str(e)}")
-            if response:
-                st.error(f"API Response: {response.text}")  # Debug-Ausgabe
+            if hasattr(e, 'response') and e.response:
+                st.error(f"API Response: {e.response.text}")
         except Exception as e:
             st.error(f"Unerwarteter Fehler für {team_name}: {str(e)}")
-
             
 # Main app
 st.title("🏒 Team Übersicht")
