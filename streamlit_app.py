@@ -1,17 +1,18 @@
 # swiss_unihockey_dashboard.py
 # -*- coding: utf-8 -*-
 """
-Streamlit Dashboard für Swiss Unihockey API v2 (über dokumentierte/observierte Endpunkte)
+Streamlit Dashboard für Swiss Unihockey API v2 (robust, mit Saison-Override & Fallbacks)
 - Nächste Spiele für definierte Teams (mit Logos)
 - Liga-Tabelle (aus /api/rankings; Parameter werden aus Teaminfos versucht zu ermitteln)
 - Liveticker via /api/game_events/{game_id}
 - Auto-Refresh alle 30 Sekunden
+- Saison in der Sidebar frei wählbar (Default 2025)
 
 Voraussetzungen:
     pip install streamlit requests streamlit-autorefresh
 
 Starten:
-    streamlit run swiss_unihockey_dashboard.py
+    streamlit run "swiss_unihockey_dashboard (1).py"
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ VERIFY_SSL = True
 MY_TEAMS: Dict[int, str] = {
     429523: "Tigers Langnau",
     429611: "Frutigen",
-    432553: "URE"
+    432553: "URE",  # Neu hinzugefügt
 }
 
 REFRESH_MS = 30 * 1000  # 30 Sekunden
@@ -40,7 +41,7 @@ REFRESH_MS = 30 * 1000  # 30 Sekunden
 # ----------------------- Hilfsfunktionen -----------------------
 
 def api_get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """HTTP GET mit robuster Fehlerbehandlung."""
+    """HTTP GET mit robuster Fehlerbehandlung und Rückgabe von Fehlerdetails."""
     url = path if path.startswith("http") else BASE_URL.rstrip("/") + "/" + path.lstrip("/")
     try:
         r = requests.get(
@@ -50,13 +51,17 @@ def api_get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any
             verify=VERIFY_SSL,
             headers={
                 "Accept": "application/json",
-                "User-Agent": "SwissUnihockey-Dashboard/1.0 (+streamlit)",
+                "User-Agent": "SwissUnihockey-Dashboard/1.1 (+streamlit)",
             },
         )
         r.raise_for_status()
         return r.json()
     except requests.HTTPError as e:
-        st.error(f"HTTP {r.status_code if 'r' in locals() else ''} bei {url} – {e}")
+        try:
+            err_json = r.json()
+        except Exception:
+            err_json = {"detail": r.text[:300] if 'r' in locals() else "unknown"}
+        st.error(f"HTTP {r.status_code if 'r' in locals() else ''} bei {url} – {e}. Details: {err_json}")
     except requests.RequestException as e:
         st.error(f"Netzwerkfehler bei {url} – {e}")
     except json.JSONDecodeError:
@@ -73,38 +78,51 @@ def safe_get(d: Any, path: List[Any], default: Any=None) -> Any:
     return cur
 
 def current_season_guess() -> int:
-    """Grober Heuristik-Guess der Saison (Jahr), wie sie in API-Param 'season' verwendet wird.
-    SwissUnihockey-Saisons starten typischerweise im August/September.
-    """
+    """Heuristik: ab Juli ist die Saison das aktuelle Jahr, sonst Vorjahr."""
     today = dt.date.today()
-    if today.month >= 7:  # ab Juli neue Saison
-        return today.year
-    return today.year - 1
+    return today.year if today.month >= 7 else today.year - 1
 
-# ----------------------- API Wrapper v2 (beobachtete Endpunkte) -----------------------
+# ----------------------- API Wrapper -----------------------
 
 def get_team(team_id: int) -> Dict[str, Any]:
-    # Beobachtet: /api/teams/{id}
     return api_get(f"teams/{team_id}")
 
-def get_games_team(team_id: int, season: Optional[int]=None, games_per_page: int=20, view: str="short") -> Dict[str, Any]:
-    """Spiele eines Teams (beobachteter Endpunkt)."""
-    if season is None:
-        season = current_season_guess()
-    params = {
-        "mode": "team",
-        "team_id": team_id,
-        "season": season,
-        "games_per_page": games_per_page,
-        "view": view,
-    }
-    return api_get("games", params)
+def get_games_team(team_id: int, season: int, games_per_page: int=20, view: str="short") -> Dict[str, Any]:
+    """Robuste Abfrage mit Fallbacks für Unterschiede im API-Gateway."""
+    # Variante A (am häufigsten beobachtet)
+    params_a = {"mode": "team", "team_id": team_id, "season": season, "games_per_page": games_per_page, "view": view}
+    data = api_get("games", params_a)
+    if data.get("entries"):
+        data["_used_params"] = params_a; return data
 
-def get_game(game_id: int) -> Dict[str, Any]:
-    return api_get(f"games/{game_id}")
+    # Variante B (ohne mode)
+    params_b = {"team_id": team_id, "season": season, "games_per_page": games_per_page, "view": view}
+    data = api_get("games", params_b)
+    if data.get("entries"):
+        data["_used_params"] = params_b; return data
+
+    # Variante C (per_page statt games_per_page)
+    params_c = {"mode": "team", "team_id": team_id, "season": season, "per_page": games_per_page, "view": view}
+    data = api_get("games", params_c)
+    if data.get("entries"):
+        data["_used_params"] = params_c; return data
+
+    # Variante D (nur team_id + per_page)
+    params_d = {"team_id": team_id, "season": season, "per_page": games_per_page, "view": view}
+    data = api_get("games", params_d)
+    if data.get("entries"):
+        data["_used_params"] = params_d; return data
+
+    # Letzter Versuch: anderes View
+    params_e = {"mode": "team", "team_id": team_id, "season": season, "games_per_page": games_per_page, "view": "extended"}
+    data = api_get("games", params_e)
+    if data.get("entries"):
+        data["_used_params"] = params_e; return data
+
+    data["_used_params"] = params_a
+    return data
 
 def get_game_events(game_id: int) -> Dict[str, Any]:
-    # Beobachtet: /api/game_events/{game_id}
     return api_get(f"game_events/{game_id}")
 
 def get_rankings(season: int, league: Optional[int]=None, game_class: Optional[int]=None, group: Optional[str]=None) -> Dict[str, Any]:
@@ -119,34 +137,29 @@ def get_rankings(season: int, league: Optional[int]=None, game_class: Optional[i
 
 # ----------------------- Ableitungen -----------------------
 
-def extract_team_context(team_id: int) -> Tuple[Optional[int], Optional[int], Optional[str]]:
-    """Versucht league, game_class, group für ein Team abzuleiten.
-    Quelle: /teams/{id} (falls vorhanden) oder aus einem Spiel-Eintrag.
-    """
+def extract_team_context(team_id: int, season:int) -> Tuple[Optional[int], Optional[int], Optional[str]]:
+    """Ermittelt league, game_class, group über /teams/{id} oder aus einem Spiel."""
     info = get_team(team_id)
     league = safe_get(info, ["league", "id"])
     game_class = safe_get(info, ["game_class", "id"])
     group = safe_get(info, ["group", "name"])
 
     if not league or not game_class or not group:
-        games = get_games_team(team_id, games_per_page=5, view="short")
-        for ent in games.get("entries", []):
+        games = get_games_team(team_id, season=season, games_per_page=5, view="short")
+        for ent in games.get("entries", []) or []:
             g = ent.get("game", {})
             league = league or safe_get(g, ["league", "id"])
             game_class = game_class or safe_get(g, ["game_class", "id"])
             group = group or safe_get(g, ["group", "name"])
             if league and game_class and group:
                 break
-
     return league, game_class, group
 
 def parse_games_rows(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for ent in data.get("entries", []) or []:
         g = ent.get("game", {})
-        # Manche Listen liefern zusätzlich "id" statt "uuid"
         gid = g.get("id") or g.get("game_id") or ent.get("id")
-        # Logos: teils unter team.logo.url, teils club_logo in anderen Responses
         rows.append({
             "game_id": gid,
             "date": g.get("date") or ent.get("date", ""),
@@ -187,15 +200,20 @@ def parse_rankings_df(data: Dict[str, Any]) -> pd.DataFrame:
 st.set_page_config(page_title="Swiss Unihockey Dashboard", layout="wide")
 st.title("🏑 Swiss Unihockey Dashboard (API v2)")
 
-# Auto-Refresh alle 30s
-try:
-    from streamlit_autorefresh import st_autorefresh
-    st_autorefresh(interval=REFRESH_MS, key="refresh_key")
-except Exception:
-    st.info("Für Autorefresh: `pip install streamlit-autorefresh` (ansonsten manuell neu laden).")
+# Sidebar: Saison-Override + Debug
+with st.sidebar:
+    st.header("⚙️ Einstellungen")
+    default_season = 2025
+    season = st.number_input("Saison (Startjahr)", min_value=2015, max_value=2030, value=default_season, step=1)
+    show_debug = st.checkbox("Debug-Infos anzeigen", value=False)
+    try:
+        from streamlit_autorefresh import st_autorefresh
+        st_autorefresh(interval=REFRESH_MS, key="refresh_key")
+        st.caption("🔁 Auto-Refresh aktiv (30 s)")
+    except Exception:
+        st.info("Für Autorefresh: `pip install streamlit-autorefresh`.")
 
-season_guess = current_season_guess()
-st.caption(f"Saison-Parameter: **{season_guess}** (heuristisch)")
+st.caption(f"Aktive Saison: **{season}**")
 
 tab_spiele, tab_tabelle, tab_ticker = st.tabs(["📅 Spiele", "📊 Tabelle", "🎥 Liveticker"])
 
@@ -203,12 +221,21 @@ with tab_spiele:
     st.header("Nächste Spiele (Teams)")
     for team_id, team_name in MY_TEAMS.items():
         st.subheader(team_name)
-        data = get_games_team(team_id, season=season_guess, games_per_page=10, view="short")
+        data = get_games_team(team_id, season=season, games_per_page=30, view="short")
+        if show_debug:
+            st.code(f"/api/games params: {json.dumps(data.get('_used_params', {}), ensure_ascii=False)}")
         rows = parse_games_rows(data)
         if not rows:
-            st.info("Keine Spiele gefunden oder falsche Team-ID/Saison.")
+            st.warning("Keine Spiele gefunden. Prüfe Team-ID oder Saison.")
+            # Zusatz: zeige Team-Metadaten zur Verifikation
+            team_info = get_team(team_id)
+            if team_info:
+                st.caption(f"Team-Check: Name: **{safe_get(team_info, ['name'], '—')}**, "
+                           f"Liga-ID: {safe_get(team_info, ['league','id'])}, "
+                           f"Klasse: {safe_get(team_info, ['game_class','id'])}, "
+                           f"Gruppe: {safe_get(team_info, ['group','name'])}")
             continue
-        for r in rows[:5]:
+        for r in rows[:8]:
             cols = st.columns([1, 5, 1, 5, 3, 2])
             if r["home_logo"]:
                 cols[0].image(r["home_logo"], width=40)
@@ -223,18 +250,19 @@ with tab_tabelle:
     st.header("Tabellen (Liga je Team)")
     for team_id, team_name in MY_TEAMS.items():
         st.subheader(team_name)
-        league, game_class, group = extract_team_context(team_id)
+        league, game_class, group = extract_team_context(team_id, season=season)
         if not (league and game_class and group):
             st.warning("Konnte Liga-Parameter nicht vollständig ermitteln.")
             continue
-        st.caption(f"Liga-Parameter: league={league}, game_class={game_class}, group={group}")
-        ranking_raw = get_rankings(season_guess, league=league, game_class=game_class, group=group)
+        if show_debug:
+            st.code(f"/api/rankings params: {{'season': {season}, 'league': {league}, 'game_class': {game_class}, 'group': '{group}'}}")
+        ranking_raw = get_rankings(season, league=league, game_class=game_class, group=group)
         if not ranking_raw:
             st.info("Keine Rankings gefunden.")
             continue
         df = parse_rankings_df(ranking_raw)
         if df.empty:
-            st.json(ranking_raw)  # Fallback, falls Struktur anders ist
+            st.json(ranking_raw)  # Fallback
         else:
             st.dataframe(df, use_container_width=True)
 
@@ -242,12 +270,11 @@ with tab_ticker:
     st.header("Liveticker")
     any_live = False
     for team_id, team_name in MY_TEAMS.items():
-        games = get_games_team(team_id, season=season_guess, games_per_page=1, view="short")
+        games = get_games_team(team_id, season=season, games_per_page=1, view="short")
         rows = parse_games_rows(games)
         if not rows:
             continue
         g = rows[0]
-        # Heuristik für "live"
         is_live = (g["status_id"] == 2) or (isinstance(g["status_text"], str) and "live" in g["status_text"].lower())
         if is_live and g["game_id"]:
             any_live = True
@@ -267,7 +294,7 @@ with tab_ticker:
         st.caption("Wenn ein Spiel live ist, erscheint hier automatisch der Ticker.")
 
 st.markdown("---")
-st.caption("Quelle: api-v2.swissunihockey.ch | Aktualisierung alle 30 Sek.")
+st.caption("Quelle: api-v2.swissunihockey.ch | Aktualisierung alle 30 Sek. | Debug-Toggle in der Sidebar")
 
 if __name__ == "__main__":
     pass
