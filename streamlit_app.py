@@ -1,15 +1,16 @@
-# swiss_unihockey_dashboard_stable.py
+# swiss_unihockey_dashboard_list_fallback.py
 # -*- coding: utf-8 -*-
 """
-Stabiles Streamlit-Dashboard für Swiss Unihockey API v2
-- Ruhigere Fehlerausgabe (gesammelt & zusammengefasst)
-- Caching (TTL) + Retries mit Backoff
-- Einmal abrufen, in allen Tabs wiederverwenden
-- Saison wählbar, Auto-Refresh 30s
+Streamlit Dashboard (stabil) mit Fallback nach CSV-Methode (mode=list)
+- Primär: /api/games?mode=team&team_id=...&season=...
+- Fallback: /api/games?mode=list&season=...&league=...&game_class=...&group=...  (Parsing regions/rows/cells)
+- Tabellen via /api/rankings
+- Liveticker via /api/game_events/{game_id}
+- Season auswählbar, Auto-Refresh 30s, Caching + Retries, Debug/Logs
 
 Start:
     pip install streamlit requests streamlit-autorefresh
-    streamlit run swiss_unihockey_dashboard_stable.py
+    streamlit run swiss_unihockey_dashboard_list_fallback.py
 """
 
 from __future__ import annotations
@@ -17,83 +18,33 @@ from typing import Any, Dict, List, Optional, Tuple
 import json
 import time
 import datetime as dt
-import hashlib
 
 import requests
 import pandas as pd
 import streamlit as st
 
 BASE_URL = "https://api-v2.swissunihockey.ch/api/"
-TIMEOUT = 12
+TIMEOUT = 14
 VERIFY_SSL = True
+REFRESH_MS = 30 * 1000
+CACHE_TTL = 20
 
-# ---------- Teams anpassen ----------
+# ---- Teams: ID -> Anzeigename ----
 MY_TEAMS: Dict[int, str] = {
     429523: "Tigers Langnau",
     429611: "Frutigen",
-    432553: "URE",  # z.B. neu
+    432553: "URE",
 }
 
-REFRESH_MS = 30 * 1000  # 30 Sekunden
-CACHE_TTL = 20          # Sekunden
-
-# ---------- Fehler-Sammeln ----------
+# ---------------- Fehlerlog ----------------
 if "error_log" not in st.session_state:
     st.session_state["error_log"] = []
 
 def log_error(msg: str):
-    # Max 5 Einträge behalten
     st.session_state["error_log"].append({"t": dt.datetime.now().strftime("%H:%M:%S"), "msg": msg})
-    st.session_state["error_log"] = st.session_state["error_log"][-5:]
+    st.session_state["error_log"] = st.session_state["error_log"][-8:]
 
-# ---------- Utils ----------
-
-def current_season_guess() -> int:
-    today = dt.date.today()
-    return today.year if today.month >= 7 else today.year - 1
-
-def _cache_key(path: str, params: Optional[Dict[str, Any]]) -> str:
-    raw = path + "|" + json.dumps(params or {}, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
-
-@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def cached_get(path: str, params: Optional[Dict[str, Any]]=None) -> Dict[str, Any]:
-    return _api_get_uncached(path, params)
-
-def _api_get_uncached(path: str, params: Optional[Dict[str, Any]]=None) -> Dict[str, Any]:
-    """GET mit 3 Retries, exponentiellem Backoff und sanfter Fehlerausgabe."""
-    url = path if path.startswith("http") else BASE_URL.rstrip("/") + "/" + path.lstrip("/")
-    headers = {"Accept": "application/json", "User-Agent": "SU-Streamlit/1.2"}
-    last_err = None
-    for attempt in range(1, 4):
-        try:
-            r = requests.get(url, params=params or {}, timeout=TIMEOUT, verify=VERIFY_SSL, headers=headers)
-            if r.status_code >= 400:
-                # Zeige nur zusammengefasste Fehlermeldung
-                snippet = ""
-                try:
-                    snippet = r.json()
-                except Exception:
-                    snippet = r.text[:200]
-                last_err = f"HTTP {r.status_code} {url} params={params} details={snippet}"
-                # 4xx retryt meist nicht viel, aber 429/408/409 ggf. kurz warten
-                if r.status_code in (408, 409, 429, 500, 502, 503, 504):
-                    time.sleep(0.6 * attempt)
-                    continue
-                break
-            return r.json()
-        except requests.RequestException as e:
-            last_err = f"Netzwerkfehler bei {url}: {e}"
-            time.sleep(0.5 * attempt)
-    if last_err:
-        log_error(last_err)
-    return {}
-
-def api_get(path: str, params: Optional[Dict[str, Any]]=None, use_cache: bool=True) -> Dict[str, Any]:
-    if use_cache:
-        return cached_get(path, params)
-    return _api_get_uncached(path, params)
-
+# ---------------- Utils ----------------
 def safe_get(d: Any, path: List[Any], default: Any=None) -> Any:
     cur = d
     for p in path:
@@ -103,17 +54,47 @@ def safe_get(d: Any, path: List[Any], default: Any=None) -> Any:
             return default
     return cur
 
-# ---------- API Wrapper ----------
+def current_season_guess() -> int:
+    today = dt.date.today()
+    return today.year if today.month >= 7 else today.year - 1
 
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def api_get(path: str, params: Optional[Dict[str, Any]]=None) -> Dict[str, Any]:
+    url = path if path.startswith("http") else BASE_URL.rstrip("/") + "/" + path.lstrip("/")
+    headers = {"Accept": "application/json", "User-Agent": "SU-Streamlit/1.3"}
+    last_err = None
+    for attempt in range(1, 4):
+        try:
+            r = requests.get(url, params=params or {}, timeout=TIMEOUT, verify=VERIFY_SSL, headers=headers)
+            if r.status_code >= 400:
+                try:
+                    snippet = r.json()
+                except Exception:
+                    snippet = r.text[:200]
+                last_err = f"HTTP {r.status_code} {url} params={params} details={snippet}"
+                # leichte Backoffs für 429/5xx
+                if r.status_code in (408, 409, 429, 500, 502, 503, 504):
+                    time.sleep(0.6 * attempt)
+                    continue
+                break
+            return r.json()
+        except requests.RequestException as e:
+            last_err = f"Netzwerkfehler {url}: {e}"
+            time.sleep(0.5 * attempt)
+    if last_err:
+        log_error(last_err)
+    return {}
+
+# ---------------- API Wrapper ----------------
 def get_team(team_id: int) -> Dict[str, Any]:
     return api_get(f"teams/{team_id}")
 
-def get_games_team(team_id: int, season: int, per_page: int=20, view: str="short") -> Dict[str, Any]:
-    # Mehrere Varianten testen, aber nur EINMAL je Aufruf
+def get_games_team_mode(team_id: int, season: int, per_page: int=20, view: str="short") -> Dict[str, Any]:
+    # verschiedene Varianten probieren
     variants = [
         {"mode": "team", "team_id": team_id, "season": season, "games_per_page": per_page, "view": view},
-        {"mode": "team", "team_id": team_id, "season": season, "per_page": per_page, "view": view},
         {"team_id": team_id, "season": season, "games_per_page": per_page, "view": view},
+        {"mode": "team", "team_id": team_id, "season": season, "per_page": per_page, "view": view},
         {"team_id": team_id, "season": season, "per_page": per_page, "view": view},
         {"mode": "team", "team_id": team_id, "season": season, "per_page": per_page, "view": "extended"},
     ]
@@ -122,13 +103,104 @@ def get_games_team(team_id: int, season: int, per_page: int=20, view: str="short
         if data.get("entries"):
             data["_used_params"] = params
             return data
-    # Nichts gefunden -> letzte Params zur Diagnose zurückgeben
     out = {"entries": []}
     out["_used_params"] = variants[0]
     return out
 
-def get_game_events(game_id: int) -> Dict[str, Any]:
-    return api_get(f"game_events/{game_id}")
+# ---- CSV-Methode: mode=list Parsing ----
+def http_get_raw(url: str, params: Optional[Dict[str, Any]]=None) -> Dict[str, Any]:
+    # un-cached, für sequentielle Listenwanderung
+    headers = {"Accept": "application/json", "User-Agent": "SU-Streamlit/1.3"}
+    for attempt in range(1, 3):
+        try:
+            r = requests.get(url, params=params or {}, timeout=TIMEOUT, verify=VERIFY_SSL, headers=headers)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            log_error(f"GET fail {url} params={params}: {e}")
+            time.sleep(0.5 * attempt)
+    return {}
+
+def parse_list_row_min(row: Dict[str, Any]) -> Tuple[Optional[int], Dict[str, Any]]:
+    cells = row.get("cells", [])
+    gid = None
+    info = {"date_time":"", "hall":"", "home":"", "away":"", "result":""}
+    if len(cells) > 0:
+        txt = cells[0].get("text", [])
+        if txt: info["date_time"] = txt[0]
+        ln = cells[0].get("link", {})
+        if isinstance(ln, dict) and ln.get("page") == "game_detail":
+            ids = ln.get("ids") or []
+            if ids: gid = ids[0]
+    if len(cells) > 1:
+        txt = cells[1].get("text", []);  info["hall"] = txt[0] if txt else info["hall"]
+    if len(cells) > 2:
+        txt = cells[2].get("text", []);  info["home"] = txt[0] if txt else info["home"]
+    if len(cells) > 6:
+        txt = cells[6].get("text", []);  info["away"] = txt[0] if txt else info["away"]
+    if len(cells) > 7:
+        txt = cells[7].get("text", []);  info["result"] = " ".join(txt) if txt else info["result"]
+
+    if gid is None:
+        for c in cells:
+            ln = c.get("link")
+            if isinstance(ln, dict) and ln.get("page") == "game_detail":
+                ids = ln.get("ids") or []
+                if ids: gid = ids[0]; break
+    return gid, info
+
+def extract_ids_rows_from_list(payload: Dict[str, Any]) -> Tuple[List[int], Dict[int, Dict[str, Any]]]:
+    ids: List[int] = []
+    rows_info: Dict[int, Dict[str, Any]] = {}
+    data = payload.get("data", {})
+    for region in data.get("regions", []):
+        for row in region.get("rows", []):
+            gid, info = parse_list_row_min(row)
+            if gid:
+                ids.append(gid)
+                rows_info.setdefault(gid, info)
+    return ids, rows_info
+
+def get_prev_round(payload: Dict[str, Any]) -> Optional[int]:
+    slider = payload.get("data", {}).get("slider", {})
+    prev = slider.get("prev")
+    if isinstance(prev, dict):
+        ctx = prev.get("set_in_context") or {}
+        rnd = ctx.get("round")
+        if isinstance(rnd, int): return rnd
+    return None
+
+def list_mode_iterate(league: str, game_class: str, season: int, group: Optional[str], max_rounds: int=80, sleep_s: float=0.3) -> Tuple[List[int], Dict[int, Dict[str, Any]]]:
+    # orientiert an Zuschauer_V4.py
+    params = {"mode": "list", "season": season, "league": league, "game_class": game_class, "view": "full"}
+    if group: params["group"] = group
+    url = BASE_URL + "games"
+
+    all_ids: List[int] = []
+    rows_map: Dict[int, Dict[str, Any]] = {}
+    seen_rounds = set()
+    rounds_walked = 0
+
+    payload = http_get_raw(url, params=params)
+    ids, rows = extract_ids_rows_from_list(payload)
+    all_ids += ids
+    rows_map.update(rows)
+    prev_round = get_prev_round(payload)
+
+    while prev_round and rounds_walked < max_rounds and prev_round not in seen_rounds:
+        seen_rounds.add(prev_round)
+        par2 = dict(params); par2["round"] = prev_round
+        payload = http_get_raw(url, params=par2)
+        ids, rows = extract_ids_rows_from_list(payload)
+        for gid in ids:
+            if gid not in all_ids:
+                all_ids.append(gid)
+        for gid, info in rows.items():
+            rows_map.setdefault(gid, info)
+        prev_round = get_prev_round(payload)
+        rounds_walked += 1
+        time.sleep(sleep_s)
+    return all_ids, rows_map
 
 def get_rankings(season: int, league: Optional[int]=None, game_class: Optional[int]=None, group: Optional[str]=None) -> Dict[str, Any]:
     params: Dict[str, Any] = {"season": season}
@@ -137,47 +209,68 @@ def get_rankings(season: int, league: Optional[int]=None, game_class: Optional[i
     if group is not None: params["group"] = group
     return api_get("rankings", params)
 
-# ---------- Ableitungen/Parsing ----------
+def get_game_events(game_id: int) -> Dict[str, Any]:
+    return api_get(f"game_events/{game_id}")
 
-def extract_team_context(team_id: int, season:int) -> Tuple[Optional[int], Optional[int], Optional[str]]:
+# --------- Ableitungen ---------
+def derive_context_from_team(team_id: int, season: int) -> Tuple[Optional[int], Optional[int], Optional[str], Optional[str]]:
+    """liefert (league, game_class, group, team_name)"""
     info = get_team(team_id)
     league = safe_get(info, ["league", "id"])
     game_class = safe_get(info, ["game_class", "id"])
     group = safe_get(info, ["group", "name"])
+    tname = safe_get(info, ["name"])
+    return league, game_class, group, tname
 
-    if not league or not game_class or not group:
-        games = get_games_team(team_id, season=season, per_page=5, view="short")
-        for ent in games.get("entries", []) or []:
+def find_upcoming_for_team(team_id: int, team_name: str, season: int) -> List[Dict[str, Any]]:
+    """Versucht zuerst mode=team. Wenn leer, benutzt mode=list und filtert nach Teamname."""
+    out: List[Dict[str, Any]] = []
+    prim = get_games_team_mode(team_id, season=season, per_page=30, view="short")
+    if prim.get("entries"):
+        # normaler Weg
+        for ent in prim["entries"]:
             g = ent.get("game", {})
-            league = league or safe_get(g, ["league", "id"])
-            game_class = game_class or safe_get(g, ["game_class", "id"])
-            group = group or safe_get(g, ["group", "name"])
-            if league and game_class and group:
-                break
-    return league, game_class, group
+            gid = g.get("id") or g.get("game_id") or ent.get("id")
+            out.append({
+                "game_id": gid,
+                "date_time": f"{g.get('date', '')} {g.get('time','')}",
+                "home": safe_get(g, ["home_team", "name"], ""),
+                "away": safe_get(g, ["away_team", "name"], ""),
+                "result": g.get("result", "-"),
+                "status": safe_get(g, ["status", "text"], ""),
+            })
+        return out[:8]
 
-def parse_games_rows(data: Dict[str, Any]) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
-    for ent in data.get("entries", []) or []:
-        g = ent.get("game", {})
-        gid = g.get("id") or g.get("game_id") or ent.get("id")
-        rows.append({
-            "game_id": gid,
-            "date": g.get("date") or ent.get("date", ""),
-            "time": g.get("time", ""),
-            "home": safe_get(g, ["home_team", "name"], ""),
-            "home_logo": safe_get(g, ["home_team", "logo", "url"], None) or safe_get(g, ["home_team", "club_logo"], None),
-            "away": safe_get(g, ["away_team", "name"], ""),
-            "away_logo": safe_get(g, ["away_team", "logo", "url"], None) or safe_get(g, ["away_team", "club_logo"], None),
-            "result": g.get("result", "-"),
-            "status_text": safe_get(g, ["status", "text"], ""),
-            "status_id": safe_get(g, ["status", "id"], None),
-        })
-    return rows
+    # Fallback: list mode
+    league, gclass, group, tname = derive_context_from_team(team_id, season)
+    name = team_name or tname or ""
+    if not (league and gclass):
+        return out  # nichts möglich
 
-def parse_rankings_df(data: Dict[str, Any]) -> pd.DataFrame:
+    ids, rows_map = list_mode_iterate(str(league), str(gclass), season, group, max_rounds=60, sleep_s=0.25)
+    # Filter: nur Spiele mit dem Teamname als Heim oder Gast
+    for gid in ids:
+        info = rows_map.get(gid, {})
+        h = (info.get("home") or "").lower()
+        a = (info.get("away") or "").lower()
+        if name and (name.lower() in h or name.lower() in a):
+            out.append({
+                "game_id": gid,
+                "date_time": info.get("date_time", ""),
+                "home": info.get("home",""),
+                "away": info.get("away",""),
+                "result": info.get("result",""),
+                "status": "",  # list-mode hat keinen Status-Text
+            })
+    return out[:8]
+
+def rankings_df_for_team(team_id: int, season: int) -> pd.DataFrame:
+    league, gclass, group, _ = derive_context_from_team(team_id, season)
+    if not (league and gclass):
+        return pd.DataFrame()
+    raw = get_rankings(season, league=league, game_class=gclass, group=group)
     rows: List[Dict[str, Any]] = []
-    for e in data.get("entries", []) or []:
+    for e in raw.get("entries", []) or []:
         rows.append({
             "Platz": e.get("rank"),
             "Team": safe_get(e, ["team", "name"], e.get("team_name", "")),
@@ -196,17 +289,14 @@ def parse_rankings_df(data: Dict[str, Any]) -> pd.DataFrame:
         df = df.sort_values("Platz", na_position="last")
     return df
 
-# ---------- Streamlit UI ----------
+# ---------------- UI ----------------
+st.set_page_config(page_title="Swiss Unihockey Dashboard – List-Fallback", layout="wide")
+st.title("🏑 Swiss Unihockey Dashboard – List-Fallback")
 
-st.set_page_config(page_title="Swiss Unihockey Dashboard – Stable", layout="wide")
-st.title("🏑 Swiss Unihockey Dashboard – Stable")
-
-# Sidebar
 with st.sidebar:
     st.header("⚙️ Einstellungen")
-    season = st.number_input("Saison (Startjahr)", min_value=2015, max_value=2030,
-                             value=2025, step=1, help="Startjahr der Saison (z. B. 2025 für Saison 2025/26)")
-    quiet_errors = st.checkbox("Fehlermeldungen komprimieren (empfohlen)", value=True)
+    season = st.number_input("Saison (Startjahr)", min_value=2015, max_value=2030, value=2025, step=1)
+    show_debug = st.checkbox("Debug anzeigen", value=False)
     try:
         from streamlit_autorefresh import st_autorefresh
         st_autorefresh(interval=REFRESH_MS, key="refresh_key")
@@ -216,107 +306,78 @@ with st.sidebar:
 
 st.caption(f"Aktive Saison: **{season}**")
 
-# ---- EINMAL abrufen & für Tabs wiederverwenden ----
-games_cache: Dict[int, Dict[str, Any]] = {}
+# Vorab: Team-Metadaten (für Logos, Liga-Params)
 team_meta: Dict[int, Dict[str, Any]] = {}
-
-for tid in MY_TEAMS.keys():
+for tid in MY_TEAMS:
     team_meta[tid] = get_team(tid)
-    games_cache[tid] = get_games_team(tid, season=season, per_page=30, view="short")
 
 tab_spiele, tab_tabelle, tab_ticker, tab_logs = st.tabs(["📅 Spiele", "📊 Tabelle", "🎥 Liveticker", "🧾 Logs"])
 
 with tab_spiele:
-    st.header("Nächste Spiele (Teams)")
-    for team_id, team_name in MY_TEAMS.items():
-        st.subheader(team_name)
-        data = games_cache.get(team_id, {}) or {}
-        rows = parse_games_rows(data)
+    st.header("Nächste Spiele (mit Fallback)")
+    for tid, name in MY_TEAMS.items():
+        st.subheader(name)
+        rows = find_upcoming_for_team(tid, name, season)
         if not rows:
-            st.warning("Keine Spiele gefunden.")
-            if team_meta.get(team_id):
-                st.caption(f"Team-Check: Name **{safe_get(team_meta[team_id], ['name'], '—')}**, "
-                           f"Liga {safe_get(team_meta[team_id], ['league','id'])}, "
-                           f"Klasse {safe_get(team_meta[team_id], ['game_class','id'])}, "
-                           f"Gruppe {safe_get(team_meta[team_id], ['group','name'])}")
-            if data.get("_used_params"):
-                st.caption(f"Verwendete Params: `{json.dumps(data['_used_params'])}`")
+            st.warning("Keine Spiele gefunden (Team-Mode leer, List-Fallback ergab keine Treffer).")
+            meta = team_meta.get(tid, {})
+            st.caption(f"Team-Check: **{safe_get(meta, ['name'],'—')}** | league={safe_get(meta,['league','id'])}, class={safe_get(meta,['game_class','id'])}, group={safe_get(meta,['group','name'])}")
             continue
-        for r in rows[:8]:
-            cols = st.columns([1, 5, 1, 5, 3, 2])
-            if r["home_logo"]:
-                cols[0].image(r["home_logo"], width=40)
+        for r in rows:
+            # Logos über Team-Meta (Heim/Auswärts-Namen matchen)
+            home_logo = safe_get(meta := team_meta.get(tid, {}), ["logo","url"], None)
+            # wir können nicht sicher beide Logos holen; zeigen nur bekannte an
+            cols = st.columns([1,5,1,5,4,2])
+            if home_logo and (r["home"].lower() in (safe_get(meta, ["name"], "").lower())):
+                cols[0].image(home_logo, width=40)
             cols[1].markdown(f"**{r['home']}**")
-            if r["away_logo"]:
-                cols[2].image(r["away_logo"], width=40)
+            cols[2].write("vs")
             cols[3].markdown(f"**{r['away']}**")
-            cols[4].markdown(f"{r['date']} {r['time']}")
-            cols[5].markdown(f"{r['result']}  \n_{r['status_text']}_")
+            cols[4].markdown(r["date_time"])
+            cols[5].markdown(r["result"] if r["result"] else "-")
 
 with tab_tabelle:
-    st.header("Tabellen (Liga je Team)")
-    for team_id, team_name in MY_TEAMS.items():
-        st.subheader(team_name)
-        league = safe_get(team_meta[team_id], ["league", "id"])
-        game_class = safe_get(team_meta[team_id], ["game_class", "id"])
-        group = safe_get(team_meta[team_id], ["group", "name"])
-
-        if not (league and game_class and group):
-            league, game_class, group = extract_team_context(team_id, season=season)
-
-        if not (league and game_class and group):
-            st.warning("Konnte Liga-Parameter nicht vollständig ermitteln.")
-            continue
-
-        st.caption(f"Liga-Parameter: league={league}, game_class={game_class}, group={group}")
-        ranking_raw = get_rankings(season, league=league, game_class=game_class, group=group)
-        df = parse_rankings_df(ranking_raw)
+    st.header("Tabellen")
+    for tid, name in MY_TEAMS.items():
+        st.subheader(name)
+        df = rankings_df_for_team(tid, season)
         if df.empty:
-            st.info("Keine Rankings gefunden oder unbekannte Struktur.")
+            st.info("Keine Rankings gefunden oder Team-Kontext unvollständig.")
         else:
             st.dataframe(df, use_container_width=True)
 
 with tab_ticker:
     st.header("Liveticker")
     any_live = False
-    for team_id, team_name in MY_TEAMS.items():
-        rows = parse_games_rows(games_cache.get(team_id, {}))
+    for tid, name in MY_TEAMS.items():
+        rows = find_upcoming_for_team(tid, name, season)
         if not rows:
             continue
         g = rows[0]
-        is_live = (g["status_id"] == 2) or (isinstance(g["status_text"], str) and "live" in g["status_text"].lower())
-        if is_live and g["game_id"]:
+        # Kein Status im list-fallback; versuche Game-Events direkt
+        gid = g.get("game_id")
+        if not gid:
+            continue
+        events = get_game_events(int(gid))
+        entries = events.get("entries", [])
+        if entries:
             any_live = True
-            st.success(f"Live: {g['home']} – {g['away']} | {g['result']}")
-            events = get_game_events(int(g["game_id"]))
-            entries = events.get("entries", [])
-            if not entries:
-                st.write("Noch keine Ticker-Ereignisse.")
-            else:
-                for e in entries:
-                    minute = e.get("minute") or e.get("time") or ""
-                    text = e.get("text") or e.get("message") or ""
-                    st.write(f"**{minute}** – {text}")
+            st.success(f"Live(?) {g['home']} – {g['away']} | {g['result'] or ''}")
+            for e in entries:
+                minute = e.get("minute") or e.get("time") or ""
+                text = e.get("text") or e.get("message") or ""
+                st.write(f"**{minute}** – {text}")
         else:
-            st.info(f"Aktuell kein Live-Spiel für {team_name}.")
+            st.info(f"Aktuell kein Ticker für {name}.")
     if not any_live:
-        st.caption("Wenn ein Spiel live ist, erscheint hier automatisch der Ticker.")
+        st.caption("Kein aktiver Liveticker gefunden.")
 
 with tab_logs:
-    st.header("Zusammengefasste Fehler/Diagnose")
+    st.header("🧾 Fehlermeldungen / Debug")
     if st.session_state["error_log"]:
-        if quiet_errors:
-            # komprimiert: nur letzte Meldung
-            last = st.session_state["error_log"][-1]
-            st.warning(f"Letzte Fehlermeldung ({last['t']}): {last['msg']}")
-            with st.expander("Alle Meldungen anzeigen"):
-                for item in st.session_state["error_log"]:
-                    st.text(f"{item['t']}  {item['msg']}")
-        else:
-            for item in st.session_state["error_log"]:
-                st.warning(f"{item['t']}  {item['msg']}")
+        for it in st.session_state["error_log"]:
+            st.warning(f"{it['t']}  {it['msg']}")
     else:
         st.success("Keine Fehler protokolliert.")
-
-st.markdown("---")
-st.caption("Quelle: api-v2.swissunihockey.ch • Caching TTL 20s • Auto-Refresh 30s")
+    if st.checkbox("Zuletzt verwendete Parameter anzeigen"):
+        st.json({"teams": list(MY_TEAMS.keys()), "season": season})
